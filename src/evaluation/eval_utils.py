@@ -3,6 +3,7 @@ sys.path.append("..")
 sys.path.append(".")
 from typing import DefaultDict
 import pickle
+import time
 SAVE_LOG = False
 
 import numpy as np
@@ -26,6 +27,8 @@ def eval(env, agent, episode=2000, log_path='', multi_level=False, post_proc_act
     success_step_record = []
     step_record = DefaultDict(list)
     path_length_record = DefaultDict(list)
+    step_time_record_ms = DefaultDict(list)
+    lidar_beam_record = DefaultDict(list)
     eval_record = []
 
     for i in trange(episode):
@@ -35,9 +38,12 @@ def eval(env, agent, episode=2000, log_path='', multi_level=False, post_proc_act
         total_reward = 0
         step_num = 0
         path_length = 0
+        episode_step_time_ms = []
+        episode_lidar_counts = []
         last_xy = (env.vehicle.state.loc.x, env.vehicle.state.loc.y)
         last_obs = obs['target']
         while not done:
+            step_start = time.perf_counter()
             step_num += 1
             if post_proc_action:
                 action, _ = agent.choose_action(obs)
@@ -47,6 +53,10 @@ def eval(env, agent, episode=2000, log_path='', multi_level=False, post_proc_act
                 action = env.action_space.sample()
             last_obs = obs['target']
             next_obs, reward, done, info = env.step(action)
+            step_duration_ms = (time.perf_counter() - step_start) * 1000.0
+            episode_step_time_ms.append(step_duration_ms)
+            beam_count = len(next_obs['lidar']) if next_obs.get('lidar') is not None else 0
+            episode_lidar_counts.append(beam_count)
             total_reward += reward
             obs = next_obs
             path_length += np.linalg.norm(np.array(last_xy)-np.array((env.vehicle.state.loc.x, env.vehicle.state.loc.y)))
@@ -76,17 +86,31 @@ def eval(env, agent, episode=2000, log_path='', multi_level=False, post_proc_act
             step_record[env.map.case_id].append(step_num)
         if succ_record[-1] == 1:
             success_step_record.append(step_num)
+        if episode_step_time_ms:
+            avg_step_time = float(np.mean(episode_step_time_ms))
+            step_time_record_ms[env.map.case_id].append(avg_step_time)
+        if episode_lidar_counts:
+            avg_beam = float(np.mean(episode_lidar_counts))
+            lidar_beam_record[env.map.case_id].append(avg_beam)
         eval_record.append({'case_id':env.map.case_id,
                             'status':info['status'],
                             'step_num':step_num,
                             'reward':total_reward,
                             'path_length':path_length,
+                            'avg_step_time_ms': float(np.mean(episode_step_time_ms)) if episode_step_time_ms else None,
+                            'avg_lidar_beam_per_step': float(np.mean(episode_lidar_counts)) if episode_lidar_counts else None,
                             })
 
     print('#'*15)
     print('EVALUATE RESULT:')
     print('success rate: ', np.mean(succ_record))
     print('average reward: ', np.mean(reward_record))
+    all_avg_step_time = [s for v in step_time_record_ms.values() for s in v]
+    all_avg_beam = [b for v in lidar_beam_record.values() for b in v]
+    if len(all_avg_step_time) > 0:
+        print('avg step time (ms): ', np.mean(all_avg_step_time))
+    if len(all_avg_beam) > 0:
+        print('avg lidar beam per step: ', np.mean(all_avg_beam))
     print('-'*10)
     print('success rate per case: ')
     case_ids = [int(k) for k in succ_rate_case.keys()]
@@ -135,6 +159,12 @@ def eval(env, agent, episode=2000, log_path='', multi_level=False, post_proc_act
         f_record_txt = open(log_path+'/result.txt', 'w', newline='')
         f_record_txt.write('success rate: %s\n'%np.mean(succ_record))
         f_record_txt.write('step num: %s '%np.mean(success_step_record)+'+-(%s)\n'%np.std(success_step_record))
+        all_avg_step_time = [s for v in step_time_record_ms.values() for s in v]
+        all_avg_beam = [b for v in lidar_beam_record.values() for b in v]
+        if len(all_avg_step_time) > 0:
+            f_record_txt.write('avg step time (ms): %s +-(%s)\n'% (np.mean(all_avg_step_time), np.std(all_avg_step_time)))
+        if len(all_avg_beam) > 0:
+            f_record_txt.write('avg lidar beam per step: %s +-(%s)\n'% (np.mean(all_avg_beam), np.std(all_avg_beam)))
         if multi_level:
             f_record_txt.write('\n')
             for k in succ_rate_level.keys():
@@ -146,6 +176,10 @@ def eval(env, agent, episode=2000, log_path='', multi_level=False, post_proc_act
                 f_record_txt.write('\ncase %s : '%k + 'success rate: %s \n'%np.mean(succ_rate_case[k]))
                 f_record_txt.write('step num: %s '%np.mean(step_record[k])+'+-(%s)\n'%np.std(step_record[k]))
                 f_record_txt.write('path length: %s '%np.mean(path_length_record[k])+'+-(%s)\n'%np.std(path_length_record[k]))
+                if k in step_time_record_ms and len(step_time_record_ms[k])>0:
+                    f_record_txt.write('avg step time (ms): %s +-(%s)\n'% (np.mean(step_time_record_ms[k]), np.std(step_time_record_ms[k])))
+                if k in lidar_beam_record and len(lidar_beam_record[k])>0:
+                    f_record_txt.write('avg lidar beam per step: %s +-(%s)\n'% (np.mean(lidar_beam_record[k]), np.std(lidar_beam_record[k])))
         f_record_txt.close()
-    
+
     return np.mean(succ_record)

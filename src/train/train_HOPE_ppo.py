@@ -172,6 +172,8 @@ if __name__=="__main__":
     case_id_list = []
     succ_record = []
     best_success_rate = [0, 0, 0, 0]
+    lidar_beam_counts = []
+    step_time_records_ms = []
 
     for i in range(args.train_episode):
         scene_chosen = scene_chooser.choose_case()
@@ -187,10 +189,17 @@ if __name__=="__main__":
         step_num = 0
         reward_info = []
         xy = []
+        episode_lidar_counts = []
+        episode_step_time_ms = []
         while not done:
             step_num += 1
+            step_start = time.perf_counter()
             action, log_prob = parking_agent.choose_action(obs)
             next_obs, reward, done, info = env.step(action)
+            step_duration_ms = (time.perf_counter() - step_start) * 1000.0
+            episode_step_time_ms.append(step_duration_ms)
+            beam_count = len(next_obs['lidar']) if next_obs.get('lidar') is not None else 0
+            episode_lidar_counts.append(beam_count)
             reward_info.append(list(info['reward_info'].values()))
             total_reward += reward
             reward_per_state_list.append(reward)
@@ -218,7 +227,7 @@ if __name__=="__main__":
                     if scene_chosen == 'dlp':
                         dlp_case_chooser.update_success_record(0, case_id)
 
-            
+        
         writer.add_scalar("total_reward", total_reward, i)
         writer.add_scalar("avg_reward", np.mean(reward_per_state_list[-1000:]), i)
         writer.add_scalar("action_std0", parking_agent.log_std.detach().cpu().numpy().reshape(-1)[0],i)
@@ -227,6 +236,14 @@ if __name__=="__main__":
             writer.add_scalar("success_rate_%s"%scene_chooser.scene_types[type_id],
                 np.mean(scene_chooser.success_record[type_id][-100:]), i)
         writer.add_scalar("step_num", step_num, i)
+        if episode_lidar_counts:
+            avg_lidar_beam = float(np.mean(episode_lidar_counts))
+            lidar_beam_counts.append(avg_lidar_beam)
+            writer.add_scalar("avg_lidar_beam_per_step", avg_lidar_beam, i)
+        if episode_step_time_ms:
+            avg_step_time = float(np.mean(episode_step_time_ms))
+            step_time_records_ms.append(avg_step_time)
+            writer.add_scalar("avg_step_time_ms", avg_step_time, i)
         reward_list.append(total_reward)
         reward_info = np.sum(np.array(reward_info), axis=0)
         reward_info = np.round(reward_info,2)

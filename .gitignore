@@ -13,4 +13,5 @@ __pycache__
 # vscode
 .vscode
 *.code-workspace
-.VSCodeCounter
+.VSCodeCounter.DS_Store
+src/.DS_Store
