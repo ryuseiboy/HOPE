@@ -55,7 +55,7 @@ def eval(env, agent, episode=2000, log_path='', multi_level=False, post_proc_act
             next_obs, reward, done, info = env.step(action)
             step_duration_ms = (time.perf_counter() - step_start) * 1000.0
             episode_step_time_ms.append(step_duration_ms)
-            beam_count = len(next_obs['lidar']) if next_obs.get('lidar') is not None else 0
+            beam_count = info.get('lidar_beam_used', len(next_obs['lidar']) if next_obs.get('lidar') is not None else 0)
             episode_lidar_counts.append(beam_count)
             total_reward += reward
             obs = next_obs
