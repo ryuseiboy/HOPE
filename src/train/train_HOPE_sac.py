@@ -106,15 +106,16 @@ if __name__=="__main__":
     parser.add_argument('--eval_episode', type=int, default=2000)
     parser.add_argument('--verbose', type=bool, default=True)
     parser.add_argument('--visualize', type=bool, default=True)
+    parser.add_argument('--use_lidar_dyn', action='store_true', help='enable dynamic lidar resolution')
     args = parser.parse_args()
 
     verbose = args.verbose
 
 
     if args.visualize:
-        raw_env = CarParking(fps=100, verbose=verbose,)
+        raw_env = CarParking(fps=100, verbose=verbose, use_lidar_dyn=args.use_lidar_dyn)
     else:
-        raw_env = CarParking(fps=100, verbose=verbose, render_mode='rgb_array')
+        raw_env = CarParking(fps=100, verbose=verbose, render_mode='rgb_array', use_lidar_dyn=args.use_lidar_dyn)
     env = CarParkingWrapper(raw_env)
     scene_chooser = SceneChoose()
     dlp_case_chooser = DlpCaseChoose()
@@ -205,7 +206,7 @@ if __name__=="__main__":
             next_obs, reward, done, info = env.step(action)
             step_duration_ms = (time.perf_counter() - step_start) * 1000.0
             episode_step_time_ms.append(step_duration_ms)
-            beam_count = len(next_obs['lidar']) if next_obs.get('lidar') is not None else 0
+            beam_count = info.get('lidar_beam_used', len(next_obs['lidar']) if next_obs.get('lidar') is not None else 0)
             episode_lidar_counts.append(beam_count)
             reward_info.append(list(info['reward_info'].values()))
             total_reward += reward

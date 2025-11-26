@@ -53,6 +53,7 @@ class CarParking(gym.Env):
         use_lidar_observation: bool =USE_LIDAR,
         use_img_observation: bool=USE_IMG,
         use_action_mask: bool=USE_ACTION_MASK,
+        use_lidar_dyn: bool=False,
     ):
         super().__init__()
 
@@ -60,6 +61,7 @@ class CarParking(gym.Env):
         self.use_lidar_observation = use_lidar_observation
         self.use_img_observation = use_img_observation
         self.use_action_mask = use_action_mask
+        self.use_lidar_dyn = use_lidar_dyn
         self.render_mode = "human" if render_mode is None else render_mode
         self.fps = fps
         self.screen: Optional[pygame.Surface] = None
@@ -80,6 +82,8 @@ class CarParking(gym.Env):
         self.reward = 0.0
         self.prev_reward = 0.0
         self.accum_arrive_reward = 0.0
+        self.prev_min_lidar = None
+        self.lidar_beam_used = LIDAR_NUM
 
         self.action_space = spaces.Box(
             np.array([VALID_STEER[0], VALID_SPEED[0]]).astype(np.float32),
@@ -129,6 +133,8 @@ class CarParking(gym.Env):
         self.prev_reward = 0.0
         self.accum_arrive_reward = 0.0
         self.t = 0.0
+        self.prev_min_lidar = None
+        self.lidar_beam_used = LIDAR_NUM
 
         if level is not None:
             self.set_level(level)
@@ -289,7 +295,8 @@ class CarParking(gym.Env):
             'box_union_reward':reward_list[4],})
 
         info = OrderedDict({'reward_info':reward_info,
-            'path_to_dest':None})
+            'path_to_dest':None,
+            'lidar_beam_used': self.lidar_beam_used})
         if self.t > 1 and status==Status.CONTINUE\
             and self.vehicle.state.loc.distance(self.map.dest.loc)<RS_MAX_DIST:
             rs_path_to_dest = self.find_rs_path(status)
@@ -366,8 +373,18 @@ class CarParking(gym.Env):
 
     def _get_lidar_observation(self,):
         obs_list = [obs.shape for obs in self.map.obstacles]
-        lidar_view = self.lidar.get_observation(self.vehicle.state, obs_list)
+        beam_num = self._select_lidar_beam_num()
+        lidar_view = self.lidar.get_observation(self.vehicle.state, obs_list, beam_num=beam_num)
+        self.lidar_beam_used = beam_num
+        self.prev_min_lidar = float(np.min(lidar_view)) if lidar_view is not None else None
         return lidar_view
+    
+    def _select_lidar_beam_num(self,):
+        if not self.use_lidar_dyn:
+            return LIDAR_NUM
+        if self.prev_min_lidar is None:
+            return LIDAR_NUM
+        return 12 if self.prev_min_lidar > 5.0 else LIDAR_NUM
     
     def _get_targt_repr(self,):
         # target position representation
@@ -538,4 +555,3 @@ class CarParking(gym.Env):
             pygame.display.quit()
             self.is_open = False
             pygame.quit()
-
