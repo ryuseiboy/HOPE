@@ -76,9 +76,8 @@ class SACAgent(AgentBase):
         # the networks
         self._init_network()
 
-        # As a on-policy RL algorithm, PPO does not have memory, the self.memory represents
-        # the buffer
-        self.memory = ReplayMemory(self.configs.memory_size, ["log_prob","next_obs"])
+        # Replay buffer with optional expert_action for imitation learning
+        self.memory = ReplayMemory(self.configs.memory_size, ["log_prob","next_obs","expert_action"])
 
         # tricks
         if self.configs.state_norm:
@@ -209,13 +208,13 @@ class SACAgent(AgentBase):
     def push_memory(self, observations):
         '''
         Args:
-            observations(tuple): (obs, action, reward, done, log_prob, next_obs)
+            observations(tuple): (obs, action, reward, done, log_prob, next_obs, expert_action)
         '''
-        obs, action, reward, done, log_prob, next_obs = deepcopy(observations)
+        obs, action, reward, done, log_prob, next_obs, expert_action = deepcopy(observations)
         if self.configs.state_norm:
             obs = self.state_normalize.state_norm(obs)
             next_obs = self.state_normalize.state_norm(next_obs,update=True)
-        observations = (obs, action, reward, done, log_prob, next_obs)
+        observations = (obs, action, reward, done, log_prob, next_obs, expert_action)
         self.memory.push(observations)
 
     def _reward_norm(self, reward):
@@ -307,6 +306,16 @@ class SACAgent(AgentBase):
             q1_value = self.critic_net1(state_batch, action_)
             q2_value = self.critic_net2(state_batch, action_)
             actor_loss = (self.alpha.detach() * log_prob - torch.min(q1_value, q2_value)).mean()
+
+            # Imitation loss for expert samples (optional)
+            expert_actions = batches.get("expert_action", None)
+            if expert_actions is not None:
+                expert_mask = torch.tensor([ea is not None for ea in expert_actions], dtype=torch.bool, device=self.device)
+                if expert_mask.any():
+                    expert_tensor = torch.FloatTensor([ea for ea in expert_actions if ea is not None]).to(self.device)
+                    actor_actions_selected = action_[expert_mask]
+                    imitation_loss = F.mse_loss(actor_actions_selected, expert_tensor)
+                    actor_loss = actor_loss + imitation_loss
 
             # update the actor network
             self.actor_optimizer.zero_grad()

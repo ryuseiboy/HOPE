@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from model.agent.sac_agent import SACAgent as SAC
 from model.agent.parking_agent import ParkingAgent, RsPlanner
+from model.planner.a_dwa_fusion import ADWAFusionPlanner
 from env.car_parking_base import CarParking
 from env.env_wrapper import CarParkingWrapper
 from env.vehicle import VALID_SPEED,Status
@@ -107,6 +108,7 @@ if __name__=="__main__":
     parser.add_argument('--verbose', type=bool, default=True)
     parser.add_argument('--visualize', type=bool, default=True)
     parser.add_argument('--use_lidar_dyn', action='store_true', help='enable dynamic lidar resolution')
+    parser.add_argument('--use_expert_il', action='store_true', help='enable expert escape (A*+DWA) and imitation loss')
     args = parser.parse_args()
 
     verbose = args.verbose
@@ -117,6 +119,7 @@ if __name__=="__main__":
     else:
         raw_env = CarParking(fps=100, verbose=verbose, render_mode='rgb_array', use_lidar_dyn=args.use_lidar_dyn)
     env = CarParkingWrapper(raw_env)
+    expert_planner = ADWAFusionPlanner() if args.use_expert_il else None
     scene_chooser = SceneChoose()
     dlp_case_chooser = DlpCaseChoose()
 
@@ -189,6 +192,7 @@ if __name__=="__main__":
         done = False
         total_reward = 0
         step_num = 0
+        episode_expert_steps = 0
         reward_info = []
         xy = []
         episode_lidar_counts = []
@@ -203,7 +207,22 @@ if __name__=="__main__":
             else:
                 action, log_prob = parking_agent.get_action(obs)
 
-            next_obs, reward, done, info = env.step(action)
+            expert_action = None
+            danger = False
+            lidar_min = None
+            if args.use_expert_il and obs.get('lidar') is not None:
+                lidar_min = float(np.min(obs['lidar']))
+                danger = lidar_min < 1.0
+            if args.use_expert_il and danger and expert_planner is not None:
+                pose = (env.env.vehicle.state.loc.x, env.env.vehicle.state.loc.y, env.env.vehicle.state.heading)
+                goal = (env.env.map.dest.loc.x, env.env.map.dest.loc.y)
+                expert_action = expert_planner.plan_action(pose, goal, env.env.map, lidar_min if lidar_min is not None else 0.5)
+                action_to_env = expert_action
+                episode_expert_steps += 1
+            else:
+                action_to_env = action
+
+            next_obs, reward, done, info = env.step(action_to_env)
             step_duration_ms = (time.perf_counter() - step_start) * 1000.0
             episode_step_time_ms.append(step_duration_ms)
             beam_count = info.get('lidar_beam_used', len(next_obs['lidar']) if next_obs.get('lidar') is not None else 0)
@@ -211,13 +230,15 @@ if __name__=="__main__":
             reward_info.append(list(info['reward_info'].values()))
             total_reward += reward
             reward_per_state_list.append(reward)
-            parking_agent.push_memory((obs, action, reward, done, log_prob, next_obs))
+            parking_agent.push_memory((obs, action, reward, done, log_prob, next_obs, expert_action))
             obs = next_obs
             if total_step_num > parking_agent.configs.memory_size and total_step_num%10==0:
                 actor_loss, critic_loss = parking_agent.update()
                 if total_step_num%200==0:
                     writer.add_scalar("actor_loss", actor_loss, i)
                     writer.add_scalar("critic_loss", critic_loss, i)
+        if args.use_expert_il:
+            writer.add_scalar("expert/steps_per_episode", episode_expert_steps, i)
             
             if info['path_to_dest'] is not None:
                 parking_agent.set_planner_path(info['path_to_dest'])
