@@ -28,7 +28,8 @@ class ReplayMemory(object):
             else:
                 batches["next_state"].append(self.memory["state"][idx+1])
         for idx in batches.keys():
-            if isinstance(batches[idx][0], np.ndarray):
+            # Convert to ndarray only when all elements are ndarrays (avoids None/object mix)
+            if batches[idx] and all(isinstance(elem, np.ndarray) for elem in batches[idx]):
                 batches[idx] = np.array(batches[idx])
         return batches
 
