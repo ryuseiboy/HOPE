@@ -243,17 +243,17 @@ if __name__=="__main__":
             if info['path_to_dest'] is not None:
                 parking_agent.set_planner_path(info['path_to_dest'])
 
-            if done:
-                if info['status']==Status.ARRIVED:
-                    succ_record.append(1)
-                    scene_chooser.update_success_record(1)
-                    if scene_chosen == 'dlp':
-                        dlp_case_chooser.update_success_record(1, case_id)
-                else:
-                    succ_record.append(0)
-                    scene_chooser.update_success_record(0)
-                    if scene_chosen == 'dlp':
-                        dlp_case_chooser.update_success_record(0, case_id)
+        if done:
+            if info['status']==Status.ARRIVED:
+                succ_record.append(1)
+                scene_chooser.update_success_record(1)
+                if scene_chosen == 'dlp':
+                    dlp_case_chooser.update_success_record(1, case_id)
+            else:
+                succ_record.append(0)
+                scene_chooser.update_success_record(0)
+                if scene_chosen == 'dlp':
+                    dlp_case_chooser.update_success_record(0, case_id)
 
         
         writer.add_scalar("total_reward", total_reward, i)
